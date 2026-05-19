@@ -58,7 +58,7 @@ function isInsideHeartAt(px, py, pz, heartScale) {
   return isInsideHeart(px / heartScale, py / heartScale, pz / heartScale)
 }
 
-/** 球形 + 心形粒子（第 2 个窗口为红色，其余为绿色） */
+/** 球形 + 心形粒子（第 2 个窗口为蓝紫色，其余为绿色） */
 function createGreenSphereParticles(radius, windowIndex) {
   const maxCount = 5800
   const positions = new Float32Array(maxCount * 3)
@@ -75,10 +75,9 @@ function createGreenSphereParticles(radius, windowIndex) {
     positions[i + 2] = z
     const glow = 0.15 + brightness * 0.85
     if (isSecondWindow) {
-      const r = 0.4 + brightness * 0.6
-      colors[i] = r * glow
-      colors[i + 1] = 0.06 * glow
-      colors[i + 2] = 0.08 * glow
+      colors[i] = (0.32 + brightness * 0.28) * glow
+      colors[i + 1] = (0.12 + brightness * 0.22) * glow
+      colors[i + 2] = (0.55 + brightness * 0.45) * glow
     } else {
       const g = 0.35 + brightness * 0.65
       colors[i] = 0.05 * glow
@@ -97,10 +96,9 @@ function createGreenSphereParticles(radius, windowIndex) {
     positions[i + 2] = z
     const glow = 0.55 + brightness * 0.45
     if (isSecondWindow) {
-      const r = 0.6 + brightness * 0.4
-      colors[i] = r * glow
-      colors[i + 1] = 0.1 * glow
-      colors[i + 2] = 0.12 * glow
+      colors[i] = (0.4 + brightness * 0.35) * glow
+      colors[i + 1] = (0.18 + brightness * 0.3) * glow
+      colors[i + 2] = (0.7 + brightness * 0.3) * glow
     } else {
       colors[i] = 0.12 * glow
       colors[i + 1] = (0.55 + brightness * 0.45) * glow
@@ -275,10 +273,10 @@ function ensureCaptionStyles() {
 				opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
 				transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 		}
-		.mw3d-toast--red {
-			border-color: rgba(255, 90, 90, 0.5);
+		.mw3d-toast--violet {
+			border-color: rgba(160, 110, 255, 0.55);
 			box-shadow:
-				0 0 24px rgba(255, 60, 60, 0.28),
+				0 0 24px rgba(120, 80, 255, 0.32),
 				0 8px 32px rgba(0, 0, 0, 0.45);
 		}
 		.mw3d-toast--visible {
@@ -298,10 +296,10 @@ function ensureCaptionStyles() {
 				border-color 3s ease-out,
 				box-shadow 3s ease-out;
 		}
-		.mw3d-toast--red.mw3d-toast--out {
-			border-color: rgba(255, 90, 90, 0);
+		.mw3d-toast--violet.mw3d-toast--out {
+			border-color: rgba(160, 110, 255, 0);
 			box-shadow:
-				0 0 8px rgba(255, 60, 60, 0.05),
+				0 0 8px rgba(120, 80, 255, 0.05),
 				0 4px 16px rgba(0, 0, 0, 0.15);
 		}
 		.mw3d-toast__line {
@@ -311,8 +309,8 @@ function ensureCaptionStyles() {
 			margin: 8px auto 0;
 			background: linear-gradient(90deg, transparent, rgba(120, 255, 150, 0.8), transparent);
 		}
-		.mw3d-toast--red .mw3d-toast__line {
-			background: linear-gradient(90deg, transparent, rgba(255, 120, 120, 0.85), transparent);
+		.mw3d-toast--violet .mw3d-toast__line {
+			background: linear-gradient(90deg, transparent, rgba(180, 140, 255, 0.9), transparent);
 		}
 	`
 	document.head.appendChild(style)
@@ -340,7 +338,7 @@ function showClickCaption(event, windowIndex) {
 	const layer = document.getElementById('mw3d-caption-layer')
 
 	const toast = document.createElement('div')
-	toast.className = 'mw3d-toast' + (windowIndex === 1 ? ' mw3d-toast--red' : '')
+	toast.className = 'mw3d-toast' + (windowIndex === 1 ? ' mw3d-toast--violet' : '')
 	toast.innerHTML = `${pickCaptionMessage(windowIndex)}<span class="mw3d-toast__line"></span>`
 	toast.style.left = `${event.clientX}px`
 	toast.style.top = `${event.clientY}px`
@@ -436,13 +434,15 @@ if (new URLSearchParams(window.location.search).get('clear')) {
     updateParticleGroups()
   }
 
+  const MAX_SCENE_WINDOWS = 2
+
   function updateParticleGroups() {
-    const wins = windowManager.getWindows()
+    const wins = windowManager.getWindows().slice(0, MAX_SCENE_WINDOWS)
 
     particleGroups.forEach(disposeParticleGroup)
     particleGroups = []
 
-    for (let i = 0; i < wins.length; i++) {
+    for (let i = 0; i < wins.length && i < MAX_SCENE_WINDOWS; i++) {
       const win = wins[i]
       if (!win || !win.shape) continue
       const radius = Math.min(win.shape.w, win.shape.h) * 0.22 + 40

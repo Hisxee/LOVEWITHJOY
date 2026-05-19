@@ -1,9 +1,12 @@
+const MAX_SCENE_WINDOWS = 2
+
 class WindowManager 
 {
 	#windows;
 	#count;
 	#id;
 	#winData;
+	#observerMode = false;
 	#winShapeChangeCallback;
 	#winChangeCallback;
 	
@@ -32,6 +35,8 @@ class WindowManager
 		// event listener for when current window is about to ble closed
 		window.addEventListener('beforeunload', function (e) 
 		{
+			if (that.#observerMode) return;
+
 			let index = that.getWindowIndexFromId(that.#id);
 
 			//remove this window from the list and update local storage
@@ -63,9 +68,16 @@ class WindowManager
 	}
 
 	// initiate current window (add metadata for custom data to store with each window instance)
+	#trimWindows ()
+	{
+		if (this.#windows.length > MAX_SCENE_WINDOWS) {
+			this.#windows = this.#windows.slice(0, MAX_SCENE_WINDOWS);
+		}
+	}
+
 	#syncCurrentWindowData ()
 	{
-		if (!this.#id) return;
+		if (!this.#id || this.#observerMode) return;
 
 		const found = this.#windows.find((w) => w.id == this.#id);
 		if (found) {
@@ -73,7 +85,7 @@ class WindowManager
 			return;
 		}
 
-		if (this.#winData) {
+		if (this.#winData && this.#windows.length < MAX_SCENE_WINDOWS) {
 			this.#windows.push(this.#winData);
 			this.updateWindowsLocalStorage();
 		}
@@ -82,13 +94,31 @@ class WindowManager
 	init (metaData)
 	{
 		this.#windows = JSON.parse(localStorage.getItem("windows") || "[]");
+		this.#trimWindows();
 		this.#count = Number(localStorage.getItem("count") || 0);
 		this.#count++;
 
 		this.#id = this.#count;
+
+		const alreadyRegistered = this.#windows.some((w) => w.id == this.#id);
+
+		// 已有两个图案窗口时，第三个及之后的页面只观看、不新增
+		if (this.#windows.length >= MAX_SCENE_WINDOWS && !alreadyRegistered) {
+			this.#observerMode = true;
+			this.#winData = null;
+			return;
+		}
+
 		let shape = this.getWinShape();
-		this.#winData = {id: this.#id, shape: shape, metaData: metaData};
-		this.#windows.push(this.#winData);
+		this.#winData = { id: this.#id, shape: shape, metaData: metaData };
+
+		const index = this.getWindowIndexFromId(this.#id);
+		if (index >= 0) {
+			this.#windows[index] = this.#winData;
+		} else {
+			this.#windows.push(this.#winData);
+			this.#trimWindows();
+		}
 
 		localStorage.setItem("count", this.#count);
 		this.updateWindowsLocalStorage();
@@ -114,6 +144,7 @@ class WindowManager
 
 	updateWindowsLocalStorage ()
 	{
+		this.#trimWindows();
 		localStorage.setItem("windows", JSON.stringify(this.#windows));
 	}
 
@@ -157,7 +188,12 @@ class WindowManager
 
 	getWindows ()
 	{
-		return this.#windows;
+		return this.#windows.slice(0, MAX_SCENE_WINDOWS);
+	}
+
+	isObserverMode ()
+	{
+		return this.#observerMode;
 	}
 
 	getThisWindowData ()
