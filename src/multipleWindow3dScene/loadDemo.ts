@@ -1,11 +1,12 @@
 /**
- * 加载 public/multipleWindow3dScene 下的原版脚本（与上游仓库一致）
- * @see https://github.com/bgstaal/multipleWindow3dScene
+ * 加载 Entangled 渲染（bundle）+ hisxee 多窗口与文案
  */
 
 const BASE = import.meta.env.BASE_URL
-const THREE_SCRIPT = `${BASE}multipleWindow3dScene/three.r124.min.js`
-const MAIN_MODULE = `${BASE}multipleWindow3dScene/main.js`
+
+function scriptUrl(path: string): string {
+  return `${BASE}multipleWindow3dScene/${path}`
+}
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -43,10 +44,18 @@ export async function startMultipleWindow3dScene(): Promise<void> {
   started = true
 
   document.body.classList.add('mw3d-active')
+  window.__hisxeeBase = BASE
+  window.__hisxeeMessagesUrl = scriptUrl('messages.json')
 
-  const win = window as Window & { THREE?: unknown }
-  if (!win.THREE) {
-    await loadScript(THREE_SCRIPT)
+  await loadModule(scriptUrl('main-entangled.js'))
+}
+
+declare global {
+  interface Window {
+    __hisxeeBase?: string
+    __hisxeeMessagesUrl?: string
+    __hisxeeOn?: { getThisWindowData?: () => { metaData?: { instanceIndex?: number } } }
+    HisxeeWindowManager?: unknown
+    __hisxeeOnEntangledReady?: (payload: { on?: unknown }) => void
   }
-  await loadModule(MAIN_MODULE)
 }

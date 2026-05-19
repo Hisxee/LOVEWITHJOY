@@ -9,6 +9,7 @@ class WindowManager
 	#observerMode = false;
 	#winShapeChangeCallback;
 	#winChangeCallback;
+	#metaDataChangeCallback;
 	
 	constructor ()
 	{
@@ -21,9 +22,17 @@ class WindowManager
 			{
 				let newWindows = JSON.parse(event.newValue || "[]");
 				let winChange = that.#didWindowsChange(that.#windows, newWindows);
+				let metaChanges = that.#diffMetaData(that.#windows, newWindows);
 
 				that.#windows = newWindows;
+				that.#trimWindows();
 				that.#syncCurrentWindowData();
+
+				if (that.#metaDataChangeCallback) {
+					for (let i = 0; i < metaChanges.length; i++) {
+						that.#metaDataChangeCallback(metaChanges[i]);
+					}
+				}
 
 				if (winChange)
 				{
@@ -75,6 +84,27 @@ class WindowManager
 		}
 	}
 
+	#diffMetaData (prev, next)
+	{
+		const changes = [];
+		for (let a = 0; a < next.length; a++) {
+			const nw = next[a];
+			for (let b = 0; b < prev.length; b++) {
+				const pw = prev[b];
+				if (nw.id != pw.id) continue;
+				for (const [key, value] of Object.entries(nw.metaData || {})) {
+					const oldVal = pw.metaData?.[key];
+					if (oldVal == null) {
+						changes.push({ id: nw.id, key, value, newlyAdded: true });
+					} else if (JSON.stringify(oldVal) !== JSON.stringify(value)) {
+						changes.push({ id: nw.id, key, value, newlyAdded: false });
+					}
+				}
+			}
+		}
+		return changes;
+	}
+
 	#syncCurrentWindowData ()
 	{
 		if (!this.#id || this.#observerMode) return;
@@ -110,6 +140,10 @@ class WindowManager
 		}
 
 		let shape = this.getWinShape();
+		const peers = this.#windows.filter(
+			(w) => w.metaData && w.metaData.resolvedIteration === metaData.resolvedIteration
+		);
+		metaData.instanceIndex = peers.length >= 1 ? 1 : 0;
 		this.#winData = { id: this.#id, shape: shape, metaData: metaData };
 
 		const index = this.getWindowIndexFromId(this.#id);
@@ -126,8 +160,10 @@ class WindowManager
 
 	getWinShape ()
 	{
-		let shape = {x: window.screenLeft, y: window.screenTop, w: window.innerWidth, h: window.innerHeight};
-		return shape;
+		// 与 entangled-bundle 的 qt() 一致，使用 screenX/Y（勿用 screenLeft/Top，否则图案会偏）
+		const x = typeof window.screenX === 'number' ? window.screenX : window.screenLeft
+		const y = typeof window.screenY === 'number' ? window.screenY : window.screenTop
+		return { x, y, w: window.innerWidth, h: window.innerHeight }
 	}
 
 	getWindowIndexFromId (id)
@@ -184,6 +220,27 @@ class WindowManager
 	setWinChangeCallback (callback)
 	{
 		this.#winChangeCallback = callback;
+	}
+
+	setMetaDataChangeCallback (callback)
+	{
+		this.#metaDataChangeCallback = callback;
+	}
+
+	setMetaData (key, value)
+	{
+		if (!this.#winData) return false;
+		if (this.#winData.metaData[key] === value) return false;
+		this.#winData.metaData[key] = value;
+		const index = this.getWindowIndexFromId(this.#id);
+		if (index >= 0) this.#windows[index].metaData = this.#winData.metaData;
+		this.updateWindowsLocalStorage();
+		return true;
+	}
+
+	numWindows ()
+	{
+		return this.#windows.length;
 	}
 
 	getWindows ()

@@ -4,8 +4,39 @@ const t = THREE
 let camera, scene, renderer, world
 let pixR = window.devicePixelRatio ? window.devicePixelRatio : 1
 let particleGroups = []
+let gravityBridge = null
+let gravityState = null
+let lastRenderTime = 0
 let sceneOffsetTarget = { x: 0, y: 0 }
 let sceneOffset = { x: 0, y: 0 }
+
+const GRAVITY_BRIDGE_COUNT = 1100
+const GRAVITY_SEPARATE_START = 48
+
+let fogParticleTexture = null
+
+function getFogParticleTexture() {
+	if (fogParticleTexture) return fogParticleTexture
+	const size = 64
+	const canvas = document.createElement('canvas')
+	canvas.width = size
+	canvas.height = size
+	const ctx = canvas.getContext('2d')
+	const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+	g.addColorStop(0, 'rgba(255,255,255,0.95)')
+	g.addColorStop(0.4, 'rgba(255,255,255,0.35)')
+	g.addColorStop(1, 'rgba(255,255,255,0)')
+	ctx.fillStyle = g
+	ctx.fillRect(0, 0, size, size)
+	fogParticleTexture = new t.CanvasTexture(canvas)
+	return fogParticleTexture
+}
+
+/** 桥截面半径系数：两端粗、中间细（与参考图一致） */
+function bridgeThicknessAt(tAlong) {
+	const end = Math.abs(tAlong - 0.5) * 2
+	return 0.1 + 0.34 * Math.pow(end, 0.82)
+}
 
 let today = new Date()
 today.setHours(0)
@@ -187,6 +218,231 @@ function disposeParticleGroup(group) {
 	world.remove(group)
 	group.geometry.dispose()
 	group.material.dispose()
+}
+
+function disposeGravityBridge() {
+	if (!gravityBridge) return
+	world.remove(gravityBridge)
+	gravityBridge.geometry.dispose()
+	gravityBridge.material.dispose()
+	gravityBridge = null
+	gravityState = null
+}
+
+function ensureGravityBridge() {
+	if (gravityBridge) return
+
+	const positions = new Float32Array(GRAVITY_BRIDGE_COUNT * 3)
+	const colors = new Float32Array(GRAVITY_BRIDGE_COUNT * 3)
+	const geometry = new t.BufferGeometry()
+	geometry.setAttribute('position', new t.BufferAttribute(positions, 3))
+	geometry.setAttribute('color', new t.BufferAttribute(colors, 3))
+
+	const material = new t.PointsMaterial({
+		map: getFogParticleTexture(),
+		size: 5.5,
+		vertexColors: t.VertexColors,
+		transparent: true,
+		opacity: 0.48,
+		blending: t.AdditiveBlending,
+		depthWrite: false,
+		sizeAttenuation: true,
+	})
+
+	gravityBridge = new t.Points(geometry, material)
+	gravityBridge.visible = false
+	world.add(gravityBridge)
+
+	gravityState = {
+		positions,
+		velocities: new Float32Array(GRAVITY_BRIDGE_COUNT * 3),
+		phase: new Float32Array(GRAVITY_BRIDGE_COUNT),
+		life: new Float32Array(GRAVITY_BRIDGE_COUNT),
+		seed: new Float32Array(GRAVITY_BRIDGE_COUNT),
+		restDist: null,
+	}
+}
+
+function projectOnBridge(px, py, x0, y0, x1, y1, dist) {
+	const dx = x1 - x0
+	const dy = y1 - y0
+	const len2 = dx * dx + dy * dy
+	if (len2 < 1) return { t: 0, cx: x0, cy: y0, perp: 0 }
+	let t = ((px - x0) * dx + (py - y0) * dy) / len2
+	t = Math.max(0, Math.min(1, t))
+	const cx = x0 + dx * t
+	const cy = y0 + dy * t
+	return { t, cx, cy, perp: Math.hypot(px - cx, py - cy) }
+}
+
+/** 沿两球连线出生：两端粗的雾桥，初速沿轴向微漂 */
+function spawnGravityParticle(i, x0, y0, x1, y1, dist) {
+	const nx = -(y1 - y0) / dist
+	const ny = (x1 - x0) / dist
+
+	const tAlong = Math.random()
+	const maxPerp = bridgeThicknessAt(tAlong) * dist
+	const perp = (Math.random() - 0.5) * 2 * maxPerp * Math.sqrt(Math.random())
+
+	const px = x0 + (x1 - x0) * tAlong + nx * perp
+	const py = y0 + (y1 - y0) * tAlong + ny * perp
+	const pz = (Math.random() - 0.5) * maxPerp * 0.35
+
+	const ax = (x1 - x0) / dist
+	const ay = (y1 - y0) / dist
+	const drift = (Math.random() - 0.5) * 6
+	gravityState.velocities[i * 3] = ax * drift
+	gravityState.velocities[i * 3 + 1] = ay * drift
+	gravityState.velocities[i * 3 + 2] = (Math.random() - 0.5) * 2
+
+	gravityState.positions[i * 3] = px
+	gravityState.positions[i * 3 + 1] = py
+	gravityState.positions[i * 3 + 2] = pz
+	gravityState.phase[i] = tAlong
+	gravityState.seed[i] = Math.random() * 200
+	gravityState.life[i] = 0.8 + Math.random() * 1.2
+}
+
+function setGravityParticleColor(i, tAlong, perpNorm, alpha) {
+	const a = Math.min(1, Math.max(0, alpha))
+	const g = [0.15, 0.95, 0.32]
+	const v = [0.58, 0.28, 0.98]
+	const topBias = Math.max(0, perpNorm) * 0.12
+	const botBias = Math.max(0, -perpNorm) * 0.12
+	const tr = Math.min(1, tAlong + topBias - botBias * 0.35)
+	gravityState.colors[i * 3] = (g[0] + (v[0] - g[0]) * tr) * a
+	gravityState.colors[i * 3 + 1] = (g[1] + (v[1] - g[1]) * tr) * a
+	gravityState.colors[i * 3 + 2] = (g[2] + (v[2] - g[2]) * tr) * a
+}
+
+function updateGravityBridge(time, dt) {
+	if (!gravityBridge || !gravityState) return
+
+	if (particleGroups.length < 2) {
+		gravityBridge.visible = false
+		gravityState.restDist = null
+		return
+	}
+
+	const g0 = particleGroups[0]
+	const g1 = particleGroups[1]
+	const x0 = g0.position.x
+	const y0 = g0.position.y
+	const x1 = g1.position.x
+	const y1 = g1.position.y
+	const dx = x1 - x0
+	const dy = y1 - y0
+	const dist = Math.sqrt(dx * dx + dy * dy) || 1
+
+	if (gravityState.restDist == null) gravityState.restDist = dist
+	if (dist < gravityState.restDist) gravityState.restDist = dist * 0.92 + dist * 0.08
+
+	const separate = dist - gravityState.restDist
+	const minSpan = (g0.userData.radius || 80) + (g1.userData.radius || 80)
+	const strength = Math.min(1, Math.max(0, (separate - GRAVITY_SEPARATE_START) / (minSpan * 0.55 + 120)))
+
+	if (strength < 0.04) {
+		gravityBridge.visible = false
+		gravityState.restDist = gravityState.restDist * 0.985 + dist * 0.015
+		return
+	}
+
+	gravityBridge.visible = true
+	const activeCount = Math.max(24, Math.floor(GRAVITY_BRIDGE_COUNT * strength))
+	gravityBridge.material.opacity = 0.38 + strength * 0.22
+
+	if (!gravityState.colors) {
+		gravityState.colors = new Float32Array(GRAVITY_BRIDGE_COUNT * 3)
+		gravityBridge.geometry.setAttribute('color', new t.BufferAttribute(gravityState.colors, 3))
+	}
+
+	const ax = dx / dist
+	const ay = dy / dist
+
+	for (let i = 0; i < GRAVITY_BRIDGE_COUNT; i++) {
+		if (i >= activeCount) {
+			gravityState.positions[i * 3 + 2] = -9999
+			gravityState.life[i] = 0
+			continue
+		}
+
+		if (gravityState.life[i] <= 0) {
+			spawnGravityParticle(i, x0, y0, x1, y1, dist)
+		}
+
+		let px = gravityState.positions[i * 3]
+		let py = gravityState.positions[i * 3 + 1]
+		let pz = gravityState.positions[i * 3 + 2]
+
+		const d0x = x0 - px
+		const d0y = y0 - py
+		const d1x = x1 - px
+		const d1y = y1 - py
+		const d0 = Math.hypot(d0x, d0y) + 55
+		const d1 = Math.hypot(d1x, d1y) + 55
+
+		const pull = 72 * strength * dt
+		const f0 = pull / (d0 * 0.022 + 1)
+		const f1 = pull / (d1 * 0.022 + 1)
+		let vx = gravityState.velocities[i * 3] + (d0x / d0) * f0 + (d1x / d1) * f1
+		let vy = gravityState.velocities[i * 3 + 1] + (d0y / d0) * f0 + (d1y / d1) * f1
+		let vz = gravityState.velocities[i * 3 + 2]
+
+		const proj = projectOnBridge(px, py, x0, y0, x1, y1, dist)
+		const maxPerp = bridgeThicknessAt(proj.t) * dist
+		if (proj.perp > maxPerp * 1.02) {
+			const push = (proj.perp - maxPerp * 0.92) * 28 * dt
+			const inv = 1 / (proj.perp || 1)
+			vx += (proj.cx - px) * inv * push
+			vy += (proj.cy - py) * inv * push
+		}
+
+		const seed = gravityState.seed[i]
+		const mist = 5 * strength * dt
+		vx += ax * Math.sin(time * 0.35 + seed) * mist
+		vy += ay * Math.cos(time * 0.32 + seed * 1.1) * mist
+		vz += Math.sin(time * 0.25 + seed * 0.7) * mist * 0.4
+
+		const damp = 0.96
+		vx *= damp
+		vy *= damp
+		vz *= damp
+
+		px += vx
+		py += vy
+		pz += vz
+
+		let proj2 = projectOnBridge(px, py, x0, y0, x1, y1, dist)
+		const limit = bridgeThicknessAt(proj2.t) * dist * 1.15 + 18
+		if (proj2.perp > limit || proj2.t < -0.06 || proj2.t > 1.06) {
+			spawnGravityParticle(i, x0, y0, x1, y1, dist)
+			px = gravityState.positions[i * 3]
+			py = gravityState.positions[i * 3 + 1]
+			pz = gravityState.positions[i * 3 + 2]
+			proj2 = projectOnBridge(px, py, x0, y0, x1, y1, dist)
+		}
+		gravityState.phase[i] = proj2.t
+
+		gravityState.positions[i * 3] = px
+		gravityState.positions[i * 3 + 1] = py
+		gravityState.positions[i * 3 + 2] = pz
+		gravityState.velocities[i * 3] = vx
+		gravityState.velocities[i * 3 + 1] = vy
+		gravityState.velocities[i * 3 + 2] = vz
+
+		gravityState.life[i] -= dt * (0.14 + strength * 0.08)
+
+		const core = 1 - Math.min(1, proj2.perp / (limit || 1))
+		const hubGlow = 0.35 + 0.65 * (Math.abs(proj2.t - 0.5) * 2)
+		const twinkle = 0.88 + 0.12 * Math.sin(time * 1.6 + seed * 0.3)
+		const pnx = -(y1 - y0) / dist
+		const pny = (x1 - x0) / dist
+		const perpSign = proj2.perp > 0.5 ? ((px - proj2.cx) * pnx + (py - proj2.cy) * pny) / proj2.perp : 0
+		setGravityParticleColor(i, gravityState.phase[i], perpSign, strength * twinkle * (0.5 + core * 0.45 + hubGlow * 0.25))
+	}
+
+	gravityBridge.geometry.attributes.position.needsUpdate = true
+	gravityBridge.geometry.attributes.color.needsUpdate = true
 }
 
 function getPointerNdc(event) {
@@ -416,6 +672,7 @@ if (new URLSearchParams(window.location.search).get('clear')) {
 
     world = new t.Object3D()
     scene.add(world)
+    ensureGravityBridge()
 
     renderer.domElement.setAttribute('id', 'scene')
     document.body.appendChild(renderer.domElement)
@@ -441,6 +698,7 @@ if (new URLSearchParams(window.location.search).get('clear')) {
 
     particleGroups.forEach(disposeParticleGroup)
     particleGroups = []
+    if (gravityState) gravityState.restDist = null
 
     for (let i = 0; i < wins.length && i < MAX_SCENE_WINDOWS; i++) {
       const win = wins[i]
@@ -461,6 +719,8 @@ if (new URLSearchParams(window.location.search).get('clear')) {
 
   function render() {
     const time = getTime()
+    const dt = Math.min(0.05, Math.max(0.001, time - lastRenderTime || 0.016))
+    lastRenderTime = time
 
     windowManager.update()
 
@@ -500,6 +760,8 @@ if (new URLSearchParams(window.location.search).get('clear')) {
 				group.scale.set(1, 1, 1)
 			}
 		}
+
+    updateGravityBridge(time, dt)
 
     renderer.render(scene, camera)
     requestAnimationFrame(render)
