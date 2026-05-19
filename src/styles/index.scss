@@ -22,6 +22,18 @@ body {
   min-height: 100dvh;
 }
 
+/* multipleWindow3dScene 全屏黑底，canvas 在 body 上 */
+body.mw3d-active {
+  overflow: hidden;
+  background: #000;
+
+  #app {
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
 img {
   max-width: 100%;
   height: auto;
