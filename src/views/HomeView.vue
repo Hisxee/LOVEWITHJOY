@@ -8,5 +8,5 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- 与原版相同：Three.js 将 canvas 挂到 document.body -->
+  <div class="mw3d-root" aria-hidden="true" />
 </template>

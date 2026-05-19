@@ -16,10 +16,11 @@ class WindowManager
 		{
 			if (event.key == "windows")
 			{
-				let newWindows = JSON.parse(event.newValue);
+				let newWindows = JSON.parse(event.newValue || "[]");
 				let winChange = that.#didWindowsChange(that.#windows, newWindows);
 
 				that.#windows = newWindows;
+				that.#syncCurrentWindowData();
 
 				if (winChange)
 				{
@@ -34,8 +35,10 @@ class WindowManager
 			let index = that.getWindowIndexFromId(that.#id);
 
 			//remove this window from the list and update local storage
-			that.#windows.splice(index, 1);
-			that.updateWindowsLocalStorage();
+			if (index >= 0) {
+				that.#windows.splice(index, 1);
+				that.updateWindowsLocalStorage();
+			}
 		});
 	}
 
@@ -60,10 +63,26 @@ class WindowManager
 	}
 
 	// initiate current window (add metadata for custom data to store with each window instance)
+	#syncCurrentWindowData ()
+	{
+		if (!this.#id) return;
+
+		const found = this.#windows.find((w) => w.id == this.#id);
+		if (found) {
+			this.#winData = found;
+			return;
+		}
+
+		if (this.#winData) {
+			this.#windows.push(this.#winData);
+			this.updateWindowsLocalStorage();
+		}
+	}
+
 	init (metaData)
 	{
-		this.#windows = JSON.parse(localStorage.getItem("windows")) || [];
-		this.#count= localStorage.getItem("count") || 0;
+		this.#windows = JSON.parse(localStorage.getItem("windows") || "[]");
+		this.#count = Number(localStorage.getItem("count") || 0);
 		this.#count++;
 
 		this.#id = this.#count;
@@ -100,23 +119,27 @@ class WindowManager
 
 	update ()
 	{
-		//console.log(step);
+		if (!this.#winData) return;
+
 		let winShape = this.getWinShape();
+		const current = this.#winData.shape;
 
-		//console.log(winShape.x, winShape.y);
-
-		if (winShape.x != this.#winData.shape.x ||
-			winShape.y != this.#winData.shape.y ||
-			winShape.w != this.#winData.shape.w ||
-			winShape.h != this.#winData.shape.h)
-		{
-			
+		if (
+			winShape.x != current.x ||
+			winShape.y != current.y ||
+			winShape.w != current.w ||
+			winShape.h != current.h
+		) {
 			this.#winData.shape = winShape;
 
 			let index = this.getWindowIndexFromId(this.#id);
-			this.#windows[index].shape = winShape;
+			if (index < 0) {
+				this.#windows.push(this.#winData);
+				index = this.#windows.length - 1;
+			} else {
+				this.#windows[index].shape = winShape;
+			}
 
-			//console.log(windows);
 			if (this.#winShapeChangeCallback) this.#winShapeChangeCallback();
 			this.updateWindowsLocalStorage();
 		}
