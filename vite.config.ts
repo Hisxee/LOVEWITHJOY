@@ -15,7 +15,7 @@ export default defineConfig({
       '@': srcDir,
     },
   },
-  base: './',
+  base: '/LOVEWITHJOY/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
