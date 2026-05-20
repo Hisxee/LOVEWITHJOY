@@ -8,20 +8,6 @@ function scriptUrl(path: string): string {
   return `${BASE}multipleWindow3dScene/${path}`
 }
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve()
-      return
-    }
-    const el = document.createElement('script')
-    el.src = src
-    el.onload = () => resolve()
-    el.onerror = () => reject(new Error(`Failed to load ${src}`))
-    document.head.appendChild(el)
-  })
-}
-
 function loadModule(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[type="module"][src="${src}"]`)) {
